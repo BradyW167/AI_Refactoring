@@ -11,7 +11,7 @@
       "Read(./*.user)",
       "Read(./*.suo)",
       "Read(./*.mdf)",
-      "Read(./*.ldf")
+      "Read(./*.ldf)"
     ]
   }
 }
