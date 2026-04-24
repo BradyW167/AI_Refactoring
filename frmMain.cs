@@ -23,25 +23,9 @@ namespace JumpGame
         // Number of game ticks per second
         private const int TicksPerSecond = (int)(1000 / GameTickSpeed);
 
-        // Starting point coordinates of the player
-        private static readonly Point PlayerStart = new Point(10, 525);
-
-        // Game objects extracted in Phase 1. Named in camelCase to avoid
-        // collision with their class names.
-        private Player player;
-        private Enemy enemy1;
-        private Enemy enemy2;
-        private MovingPlatform movingPlatform1;
-        private MovingPlatform movingPlatform2;
-
-        // Set true during the collision pass when the player lands on any
-        // platform this tick; consumed to update the Grounded flag at end of tick.
-        private bool LandedOnPlatform { get; set; }
-
-        // Number of score points
-        private int Score { get; set; }
-        // Number of milliseconds passed since game start
-        private int Time { get; set; }
+        // Owns movement, collisions, scoring, grounded tracking, and
+        // victory/death detection. frmMain is the UI shell around it.
+        private GameEngine engine;
 
         // Plays audio streams
         private SoundPlayer MusicPlayer;
@@ -71,11 +55,13 @@ namespace JumpGame
             picEnemy2.Tag = "enemy";
             /* ----------------------------------------------------- */
 
-            player = new Player(picPlayer);
-            enemy1 = new Enemy(picEnemy1, speed: 6);
-            enemy2 = new Enemy(picEnemy2, speed: 8);
-            movingPlatform1 = new MovingPlatform(lblPlatform4, speed: 3, topLimit: 350, bottomLimit: 470);
-            movingPlatform2 = new MovingPlatform(lblPlatform6, speed: 7, topLimit: 160, bottomLimit: 280);
+            engine = new GameEngine(
+                this.Controls,
+                picPlayer,
+                picEnemy1, picEnemy2,
+                lblPlatform4, lblPlatform6);
+            engine.PlayerDied += PlayerDeath;
+            engine.PlayerWon += Victory;
 
             // Reset incosistent variables for new game
             InitializeGame();
@@ -120,7 +106,7 @@ namespace JumpGame
                 return false;
             }
 
-            // Parameterized query string (prevents SQL code injection) 
+            // Parameterized query string (prevents SQL code injection)
             string query = "INSERT INTO Scores (username,score,time,date) VALUES (@username,@score,@time,@date)";
 
             Command = Connection.CreateCommand();
@@ -142,40 +128,12 @@ namespace JumpGame
         // Resets all necessary properties for a new game
         private void InitializeGame()
         {
-            ResetCharacters();
-            ResetCoins();
-
-            Score = 0;
-            Time = 0;
+            engine.Reset();
 
             PlayNewAudio(Resources.theme, true);
 
             tmrGame.Start();
         }
-
-        // Resets character objects
-        private void ResetCharacters()
-        {
-            player.Reset(PlayerStart);
-            enemy1.Reset(GetRandomPlatform());
-            enemy2.Reset(GetRandomPlatform());
-        }
-
-        // Make all collected coins visible again
-        private void ResetCoins()
-        {
-            foreach (Control control in this.Controls)
-            {
-                if (control.Tag != null)
-                {
-                    if (control is PictureBox && (string)control.Tag == "coin")
-                    {
-                        control.Visible = true;
-                    }
-                }
-            }
-        }
-
 
         // Plays input audio file from the SoundPlayer
         private void PlayNewAudio(UnmanagedMemoryStream newStream, bool loopMusic = false)
@@ -189,183 +147,29 @@ namespace JumpGame
                 MusicPlayer.Play();
         }
 
-        // Returns a random platform as a Label
-        private Label GetRandomPlatform()
-        {
-            Random rand = new Random();
-
-            // Define the possible platform name numbers
-            int[] platformNumbers = { 2, 3, 5, 7, 8 };
-
-            // Select a random index from 0 to platformNumbers.Length
-            int randIndex = rand.Next(platformNumbers.Length);
-
-            // Get the platform name using the random index
-            string randomPlatformName = $"lblPlatform{platformNumbers[randIndex]}";
-
-            if (this.Controls[randomPlatformName] is Label randomPlatform)
-                return randomPlatform;
-            else
-                return new Label();
-        }
-
         // User input handler for key presses
         private void KeyIsDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Left) player.OnLeftDown();
-            if (e.KeyCode == Keys.Right) player.OnRightDown();
-            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) player.OnJumpDown();
+            if (e.KeyCode == Keys.Left) engine.Player.OnLeftDown();
+            if (e.KeyCode == Keys.Right) engine.Player.OnRightDown();
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) engine.Player.OnJumpDown();
         }
 
         // User input handler for key releases
         private void KeyIsUp(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Left) player.OnLeftUp();
-            if (e.KeyCode == Keys.Right) player.OnRightUp();
-            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) player.OnJumpUp();
+            if (e.KeyCode == Keys.Left) engine.Player.OnLeftUp();
+            if (e.KeyCode == Keys.Right) engine.Player.OnRightUp();
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) engine.Player.OnJumpUp();
         }
 
         // Game tick function, runs every (GameTickSpeed) milliseconds
         private void tmrGame_Tick(object sender, EventArgs e)
         {
-            UpdateTime();
-            UpdateScore();
+            lblTime.Text = "Time: " + (engine.Ticks / TicksPerSecond);
+            lblScore.Text = "Score: " + engine.Score;
 
-            MoveImages();
-
-            // Reset landed state
-            LandedOnPlatform = false;
-
-            // Loop through all controls in this game form
-            foreach (Control control in this.Controls)
-            {
-                // Check control.Tag type (controls with tags are game objects with collision)
-                if (control.Tag is string tagValue)
-                {
-                    CheckCollision(control, tagValue);
-                }
-            }
-
-            // After all other checks, update grounded boolean
-            // Needed for moving platforms
-            if (!LandedOnPlatform)
-            {
-                player.Grounded = false;
-            }
-        }
-
-        private void UpdateTime()
-        {
-            lblTime.Text = "Time: " + (Time / TicksPerSecond);
-            Time += 1;
-        }
-
-        private void UpdateScore()
-        {
-            lblScore.Text = "Score: " + Score;
-        }
-
-        // Runs movement handling for all moving images
-        private void MoveImages()
-        {
-            if (player.Update(this.ClientSize.Width, this.ClientSize.Height))
-            {
-                PlayerDeath();
-            }
-
-            enemy1.Update();
-            enemy2.Update();
-
-            movingPlatform1.Update();
-            movingPlatform2.Update();
-        }
-
-        private void CheckCollision(Control control, string tagValue)
-        {
-            if (tagValue == "enemy")
-            {
-                EnemyCollisionCheck(control);
-            }
-
-            if (tagValue == "coin")
-            {
-                CoinCollisionCheck(control);
-            }
-
-            if (tagValue == "platform" || tagValue == "movingPlatform")
-            {
-                PlatformCollisionCheck(control);
-            }
-            if (tagValue == "door")
-            {
-                DoorCollisionCheck(control);
-            }
-        }
-
-        private void EnemyCollisionCheck(Control enemy)
-        {
-            if (picPlayer.Bounds.IntersectsWith(enemy.Bounds))
-            {
-                PlayerDeath();
-            }
-        }
-
-        private void CoinCollisionCheck(Control coin)
-        {
-            if (picPlayer.Bounds.IntersectsWith(coin.Bounds) && coin.Visible)
-            {
-                coin.Visible = false;
-                Score += 1;
-            }
-        }
-
-        // Returns true when player is grounded on top of a platform, false when not
-        private void PlatformCollisionCheck(Control platform)
-        {
-            if (picPlayer.Bounds.IntersectsWith(platform.Bounds))
-            {
-                Rectangle plat = platform.Bounds;
-
-                // Additional pixels added to collision checks
-                // Prevents player image from bouncing while on platforms
-                const int SafetyThreshold = 5;
-
-                // Landing on top of platform
-                if (picPlayer.Bottom >= plat.Top - 5 &&
-                    picPlayer.Top < plat.Top &&
-                    player.JumpSpeed >= 0)
-                {
-                    LandedOnPlatform = true;
-                    player.Grounded = true;
-                    player.JumpSpeed = 0;
-                    picPlayer.Top = plat.Top - picPlayer.Height + 1;
-                }
-                // Hitting platform from the sides
-                else if (picPlayer.Right > plat.Left && picPlayer.Left < plat.Left && picPlayer.Bottom > plat.Top + SafetyThreshold)
-                {
-                    picPlayer.Left = plat.Left - picPlayer.Width;
-                    player.StopMovingRight();
-                }
-                else if (picPlayer.Left < plat.Right && picPlayer.Right > plat.Right && picPlayer.Bottom > plat.Top + SafetyThreshold)
-                {
-                    picPlayer.Left = plat.Right;
-                    player.StopMovingLeft();
-                }
-                // Hitting platform from below
-                else if (picPlayer.Top < plat.Bottom && picPlayer.Bottom > plat.Bottom)
-                {
-                    player.JumpSpeed = 5; // small bounce back
-                    picPlayer.Top = plat.Bottom;
-                }
-            }
-        }
-
-        private void DoorCollisionCheck(Control door)
-        {
-            if (picPlayer.Bounds.IntersectsWith(door.Bounds))
-            {
-                Victory();
-            }
+            engine.Tick(this.ClientSize.Width, this.ClientSize.Height);
         }
 
         // Ends game with victory
@@ -374,9 +178,9 @@ namespace JumpGame
             tmrGame.Stop();
             PlayNewAudio(Resources.smb_gameover);
 
-            int TimeInSeconds = (int)(Time / TicksPerSecond);
+            int TimeInSeconds = (int)(engine.Ticks / TicksPerSecond);
 
-            InsertScore(Username, Score, TimeInSeconds, DateTime.Now);
+            InsertScore(Username, engine.Score, TimeInSeconds, DateTime.Now);
 
             RestartPrompt(true);
         }
@@ -397,7 +201,7 @@ namespace JumpGame
             string caption = "Play Again?";
 
             if (wonGame)
-                message = $"You Won! Score:{Score}\n\nView Scores?";
+                message = $"You Won! Score:{engine.Score}\n\nView Scores?";
             else
                 message = "You Died!\n\nPlay Again?";
 
