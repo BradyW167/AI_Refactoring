@@ -1,7 +1,4 @@
 using JumpGame.Properties;
-using Microsoft.Data.SqlClient;
-using System.Data;
-using System.Diagnostics;
 using System.Media;
 using System.Runtime.InteropServices;
 
@@ -9,14 +6,12 @@ namespace JumpGame
 {
     public partial class frmMain : Form
     {
-        // Name of logged in user
-        private string Username {  get; set; }
-        // Connection options
+        // Logged-in user
+        private User User { get; set; }
+        // Connection options (forwarded to frmScores)
         private string ConnectionString { get; set; }
-        // Connection to database
-        private SqlConnection Connection { get; set; }
-        // Setup for singular commands
-        private SqlCommand Command { get; set; }
+        // Persistence layer
+        private DatabaseManager Database { get; set; }
 
         // Length of a game tick in milliseconds
         private const int GameTickSpeed = 40;
@@ -30,16 +25,15 @@ namespace JumpGame
         // Plays audio streams
         private SoundPlayer MusicPlayer;
 
-        public frmMain(string username, string connectionString)
+        public frmMain(User user, string connectionString)
         {
             InitializeComponent();
 
-            Username = username;
-            lblUsername.Text = Username;
+            User = user;
+            lblUsername.Text = User.Username;
 
             ConnectionString = connectionString;
-            Connection = new SqlConnection(ConnectionString);
-            Command = Connection.CreateCommand();
+            Database = new DatabaseManager(ConnectionString);
 
             MusicPlayer = new SoundPlayer();
 
@@ -65,64 +59,6 @@ namespace JumpGame
 
             // Reset incosistent variables for new game
             InitializeGame();
-        }
-
-        // Attempts to open a connection to a MySQL database.
-        // Returns true on successful connection, false on failure
-        private bool OpenConnection()
-        {
-            try
-            {
-                if (Connection != null)
-                {
-                    // Check if it's marked open but is actually unusable
-                    if (Connection.State == ConnectionState.Open)
-                    {
-                        return true;
-                    }
-                    else
-                    {
-                        Connection.Dispose();
-                        Connection = new SqlConnection(ConnectionString);
-                    }
-
-                    Connection.Open();
-                }
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Returning false, Unexpected error: " + ex.Message);
-                return false;
-            }
-        }
-
-        // Inserts input data into the Scores table
-        private bool InsertScore(string username, int score, int time, DateTime date)
-        {
-            if (!OpenConnection())
-            {
-                return false;
-            }
-
-            // Parameterized query string (prevents SQL code injection)
-            string query = "INSERT INTO Scores (username,score,time,date) VALUES (@username,@score,@time,@date)";
-
-            Command = Connection.CreateCommand();
-            Command.CommandText = query;
-
-            // Fill parameters with actual values
-            Command.Parameters.AddWithValue("@username", username);
-            Command.Parameters.AddWithValue("@score", score);
-            Command.Parameters.AddWithValue("@time", time);
-            Command.Parameters.AddWithValue("@date", date);
-
-            // Execute command and store returned data
-            int result = Command.ExecuteNonQuery();
-
-            // If columns were modified, return true
-            return result > 0;
         }
 
         // Resets all necessary properties for a new game
@@ -180,7 +116,7 @@ namespace JumpGame
 
             int TimeInSeconds = (int)(engine.Ticks / TicksPerSecond);
 
-            InsertScore(Username, engine.Score, TimeInSeconds, DateTime.Now);
+            Database.InsertScore(new Score(User.Username, engine.Score, TimeInSeconds, DateTime.Now));
 
             RestartPrompt(true);
         }
@@ -212,7 +148,7 @@ namespace JumpGame
                 if (wonGame)
                 {
                     this.Hide();
-                    frmScores scoreForm = new frmScores(Username, ConnectionString);
+                    frmScores scoreForm = new frmScores(User, ConnectionString);
                     scoreForm.Show();
                     this.Dispose();
                 }

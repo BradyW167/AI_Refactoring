@@ -62,3 +62,54 @@
 ### Build
 - `dotnet build` — 0 warnings, 0 errors.
 - `dotnet build --configuration Release` — 0 warnings, 0 errors.
+
+## Phase 3 — Extracting Database Interaction and Building Data Storage
+
+### New files
+- `User.cs` — data container for a row of the Users table. Fields: `Username`, `Password`. Constructor `User(username, password)`.
+- `Score.cs` — data container for a row of the Scores table. Fields: `Username`, `Points`, `Time`, `Date`. Constructor `Score(username, points, time, date)`. Property is named `Points` rather than `Score` because C# disallows a member name that matches its enclosing type.
+- `DatabaseManager.cs` — owns the `SqlConnection` and all raw SQL for the game. Public surface: `DatabaseManager(connectionString)`, `ValidateLogin(User)`, `InsertScore(Score)`, `GetScores()`. Private helpers `OpenConnection`/`CloseConnection` were moved in verbatim from the three forms (they were byte-for-byte duplicates of each other).
+
+### Changes in `frmLogin.cs`
+- Removed fields now owned by `DatabaseManager`: `Connection`, `Command`, `Reader`.
+- Removed methods now owned by `DatabaseManager`: `OpenConnection`, `LoginQuery`, `CloseConnection`.
+- Removed the unused `Username` property (it was cleared by `Logout()` but never read — frmLogin's only job after login is to pass credentials to frmMain, which is now done locally).
+- Added a `Database` field constructed from the connection string in the ctor.
+- `btnLogin_Click` constructs a `User(txtUsername.Text, txtPassword.Text)` and calls `Database.ValidateLogin(user)`; on success it hands the same `User` to `frmMain`.
+- Pruned unused `using` directives (`Microsoft.Data.SqlClient`, `System.Data`, `System.Diagnostics`, and several auto-added VS defaults that were never referenced).
+
+### Changes in `frmMain.cs`
+- Removed fields now owned by `DatabaseManager`: `Connection`, `Command`, the `SqlConnection` held alongside `ConnectionString`.
+- Removed methods now owned by `DatabaseManager`: `OpenConnection`, `InsertScore`.
+- Replaced `private string Username` with `private User User` — the form now carries the whole logged-in user object. `lblUsername.Text = User.Username` preserves the display.
+- Constructor signature changed: `frmMain(User user, string connectionString)` (was `(string username, string connectionString)`). Call sites in `frmLogin` (after login) and `frmScores` (Play Again) were updated.
+- Added a `Database` field constructed from the connection string in the ctor.
+- `Victory` now calls `Database.InsertScore(new Score(User.Username, engine.Score, TimeInSeconds, DateTime.Now))` instead of the removed `InsertScore(Username, engine.Score, TimeInSeconds, DateTime.Now)`.
+- `RestartPrompt` passes `User` (not `Username`) to `frmScores`.
+- Pruned unused `using` directives (`Microsoft.Data.SqlClient`, `System.Data`, `System.Diagnostics`).
+
+### Changes in `frmScores.cs`
+- Removed fields now owned by `DatabaseManager`: `Connection`, `Adapter`.
+- Removed methods now owned by `DatabaseManager`: `OpenConnection`, `GetScores`.
+- Replaced `private string Username` with `private User User`.
+- Constructor signature changed: `frmScores(User user, string connectionString)`.
+- Added a `Database` field constructed from the connection string in the ctor; `ScoreDataTable = Database.GetScores()` replaces the inline query.
+- `btnPlayAgain_Click` now passes `User` to `frmMain`.
+- Pruned unused `using` directives (`Microsoft.Data.SqlClient`, `System.Diagnostics`, and several auto-added VS defaults including `static System.Windows.Forms.VisualStyles.VisualStyleElement.StartPanel`). `System.Data` is kept because `DataTable` is still used.
+
+### Intentionally NOT changed
+- **`GetScores` still returns `DataTable`.** Binding a `List<Score>` to the grid would change column headers: DataTable preserves the SQL `Select` aliases (`Username`, `Score`, `Time`, `Date`), but a `List<Score>` would generate them from property names — including the awkward `Points` rename. Returning DataTable keeps the grid's observable appearance identical.
+- **Each form still constructs its own `DatabaseManager` from a shared connection string.** Sharing one `DatabaseManager` across forms would have been cleaner, but the original architecture gives each form its own `SqlConnection`; keeping per-form `DatabaseManager` preserves connection lifetimes 1:1 with the old code.
+- **Connection lifecycle quirks preserved.** `InsertScore` and `GetScores` do not close the connection after their query, matching the original (`LoginQuery` is the only query that called `CloseConnection`). The next query reuses the open connection via the `State == Open` short-circuit in `OpenConnection`.
+- **`User.Password` is retained on the class** even though it is only read during `ValidateLogin`. It belongs to the Users-table schema so the data container matches the table.
+- **Audio, timer, form navigation, and game logic are untouched** — Phase 3 is strictly the persistence split.
+
+### Design notes
+- **Why `Score.Points` instead of `Score.Score`:** C# forbids a member with the same name as its enclosing type, so the property had to be renamed. The SQL column is still `score` and the `InsertScore` parameter is still `@score`; the mismatch is contained inside `DatabaseManager.InsertScore` which maps `score.Points → @score`.
+- **Why pass `User` through constructors rather than a raw username string:** it's the OOP structure Phase 3 asks for, and it costs one line per form. `lblUsername.Text = User.Username` is identical to the old `lblUsername.Text = Username`.
+- **`ValidateLogin` takes a `User` rather than two strings** for the same reason — the form builds a `User` from the textboxes and hands it over. If the method later needs to return a hydrated user (id, roles, etc.), the signature already matches.
+- **Connection string still flows as a string** between forms rather than a `DatabaseManager` instance. This was deliberate (see "Intentionally NOT changed" above) to keep per-form connection lifetime identical to Phase 2.
+
+### Build
+- `dotnet build` — 0 warnings, 0 errors.
+- `dotnet build --configuration Release` — 0 warnings, 0 errors.
