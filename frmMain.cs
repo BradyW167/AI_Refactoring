@@ -18,22 +18,6 @@ namespace JumpGame
         // Setup for singular commands
         private SqlCommand Command { get; set; }
 
-        // Number of pixels to move horizontally per tick
-
-        private const int PlayerSpeed = 10;
-        // Number of pixels to move enemies horizontally per tick
-        private const int Enemy1Speed = 6;
-        private const int Enemy2Speed = 8;
-        // Number of pixels to move platforms vertically per tick
-        private const int MovingPlatform1Speed = 3;
-        private const int MovingPlatform2Speed = 7;
-
-        // Platform height limits
-        private const int Platform1Top = 350;
-        private const int Platform2Top = 160;
-        private const int Platform1Bottom = 470;
-        private const int Platform2Bottom = 280;
-
         // Length of a game tick in milliseconds
         private const int GameTickSpeed = 40;
         // Number of game ticks per second
@@ -42,42 +26,22 @@ namespace JumpGame
         // Starting point coordinates of the player
         private static readonly Point PlayerStart = new Point(10, 525);
 
-        // Number of pixels to move vertically per tick
-        private int JumpSpeed {  get; set; }
+        // Game objects extracted in Phase 1. Named in camelCase to avoid
+        // collision with their class names.
+        private Player player;
+        private Enemy enemy1;
+        private Enemy enemy2;
+        private MovingPlatform movingPlatform1;
+        private MovingPlatform movingPlatform2;
 
-        // Number of pixels to decrease JumpSpeed per tick
-        private int Gravity { get; set; }
-
-        // State of groundedness
-        private bool Grounded { get; set; }
+        // Set true during the collision pass when the player lands on any
+        // platform this tick; consumed to update the Grounded flag at end of tick.
         private bool LandedOnPlatform { get; set; }
-
-        // State of jumping
-        private bool Jumping { get; set; }
-
-        // State of player movement
-        private bool GoLeft { get; set; }
-        private bool GoRight { get; set; }
-
-        // State of enemy movement
-        private bool Enemy1GoRight { get; set; }
-        private bool Enemy2GoRight { get; set; }
-        // State of platform movement
-        private bool Platform1GoDown { get; set; }
-        private bool Platform2GoDown { get; set; }
-
-        // Platforms that each enemy moves on
-        private Label Enemy1Platform {  get; set; }
-        private Label Enemy2Platform {  get; set; }
 
         // Number of score points
         private int Score { get; set; }
         // Number of milliseconds passed since game start
         private int Time { get; set; }
-
-        // Last key input for player orientation
-        private bool LastKeyLeft { get; set; }
-        private bool LastKeyRight { get; set;}
 
         // Plays audio streams
         private SoundPlayer MusicPlayer;
@@ -93,9 +57,6 @@ namespace JumpGame
             Connection = new SqlConnection(ConnectionString);
             Command = Connection.CreateCommand();
 
-            Enemy1Platform = new Label();
-            Enemy2Platform = new Label();
-
             MusicPlayer = new SoundPlayer();
 
             /* ---- YOU CAN CHANGE ALL THESE IN THE DESIGNER TAB --- */
@@ -109,6 +70,12 @@ namespace JumpGame
             picEnemy1.Tag = "enemy";
             picEnemy2.Tag = "enemy";
             /* ----------------------------------------------------- */
+
+            player = new Player(picPlayer);
+            enemy1 = new Enemy(picEnemy1, speed: 6);
+            enemy2 = new Enemy(picEnemy2, speed: 8);
+            movingPlatform1 = new MovingPlatform(lblPlatform4, speed: 3, topLimit: 350, bottomLimit: 470);
+            movingPlatform2 = new MovingPlatform(lblPlatform6, speed: 7, topLimit: 160, bottomLimit: 280);
 
             // Reset incosistent variables for new game
             InitializeGame();
@@ -181,9 +148,6 @@ namespace JumpGame
             Score = 0;
             Time = 0;
 
-            LastKeyLeft = false;
-            LastKeyRight = true;
-
             PlayNewAudio(Resources.theme, true);
 
             tmrGame.Start();
@@ -192,8 +156,9 @@ namespace JumpGame
         // Resets character objects
         private void ResetCharacters()
         {
-            ResetPlayer();
-            ResetEnemies();
+            player.Reset(PlayerStart);
+            enemy1.Reset(GetRandomPlatform());
+            enemy2.Reset(GetRandomPlatform());
         }
 
         // Make all collected coins visible again
@@ -224,55 +189,6 @@ namespace JumpGame
                 MusicPlayer.Play();
         }
 
-        // Repositions player and resets movement properties
-        private void ResetPlayer()
-        {
-            picPlayer.Location = PlayerStart;
-
-            JumpSpeed = 0;
-            Gravity = 2;
-
-            Grounded = false;
-            Jumping = false;
-
-            GoLeft = false;
-            GoRight = false;
-
-            if (LastKeyLeft)
-            {
-                FlipHorizontal(picPlayer);
-            }
-
-            picPlayer.BringToFront();
-        }
-
-        // Repositons enemies to a random starting platform
-        private void ResetEnemies()
-        {
-            Enemy1Platform = GetRandomPlatform();
-            Enemy2Platform = GetRandomPlatform();
-
-            PutEnemyOnPlatform(picEnemy1, Enemy1Platform);
-            PutEnemyOnPlatform(picEnemy2, Enemy2Platform);
-
-            // Flip image if enemy was going left
-            if (!Enemy1GoRight)
-            {
-                FlipHorizontal(picEnemy1);
-            }
-            if (!Enemy2GoRight)
-            {
-                FlipHorizontal(picEnemy2);
-            }
-
-            Enemy1GoRight = true;
-            Enemy2GoRight = true;
-
-            // Ensures that enemy images are not behind coins
-            picEnemy1.BringToFront();
-            picEnemy2.BringToFront();
-        }
-
         // Returns a random platform as a Label
         private Label GetRandomPlatform()
         {
@@ -293,67 +209,20 @@ namespace JumpGame
                 return new Label();
         }
 
-        // Positions enemy on input platform
-        private void PutEnemyOnPlatform(PictureBox enemy, Label platform)
-        {
-            int top = platform.Top - enemy.Height;
-
-            int left = platform.Left + enemy.Width;
-
-            enemy.Location = new Point(left, top);
-        }
-
         // User input handler for key presses
         private void KeyIsDown(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Left)
-            {
-                GoLeft = true;
-
-                if (LastKeyRight == true)
-                {
-                    FlipHorizontal(picPlayer);
-                }
-
-                LastKeyRight = false;
-                LastKeyLeft = true;
-            }
-
-            if (e.KeyCode == Keys.Right)
-            {
-                GoRight = true;
-
-                if (LastKeyLeft == true)
-                {
-                    FlipHorizontal(picPlayer);
-                }
-
-                LastKeyRight = true;
-                LastKeyLeft = false;
-            }
-
-            // If (key hit is space or up arrow) and player is grounded
-            if ((e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) && Grounded && !Jumping)
-            {
-                Jumping = true;
-            }
+            if (e.KeyCode == Keys.Left) player.OnLeftDown();
+            if (e.KeyCode == Keys.Right) player.OnRightDown();
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) player.OnJumpDown();
         }
 
         // User input handler for key releases
         private void KeyIsUp(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Left)
-            {
-                GoLeft = false;
-            }
-            if (e.KeyCode == Keys.Right)
-            {
-                GoRight = false;
-            }
-            if ((e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) && Jumping)
-            {
-                Jumping = false;
-            }
+            if (e.KeyCode == Keys.Left) player.OnLeftUp();
+            if (e.KeyCode == Keys.Right) player.OnRightUp();
+            if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Up) player.OnJumpUp();
         }
 
         // Game tick function, runs every (GameTickSpeed) milliseconds
@@ -381,7 +250,7 @@ namespace JumpGame
             // Needed for moving platforms
             if (!LandedOnPlatform)
             {
-                Grounded = false;
+                player.Grounded = false;
             }
         }
 
@@ -399,122 +268,16 @@ namespace JumpGame
         // Runs movement handling for all moving images
         private void MoveImages()
         {
-            CheckPlayerMovement();
-
-            Enemy1GoRight = MoveEnemy(picEnemy1, Enemy1Speed, Enemy1Platform, Enemy1GoRight);
-            Enemy2GoRight = MoveEnemy(picEnemy2, Enemy2Speed, Enemy2Platform, Enemy2GoRight);
-
-            Platform1GoDown = MovePlatform(lblPlatform4, MovingPlatform1Speed, Platform1GoDown, Platform1Top, Platform1Bottom);
-            Platform2GoDown = MovePlatform(lblPlatform6, MovingPlatform2Speed, Platform2GoDown, Platform2Top, Platform2Bottom);
-        }
-
-        // Handles player movement
-        private void CheckPlayerMovement()
-        {
-            if (GoLeft)
-            {
-                // Shift player by 'Speed' number of pixels
-                picPlayer.Left -= PlayerSpeed;
-
-                // If player goes past the left bounds of the screen
-                if (picPlayer.Left < 0)
-                {
-                    picPlayer.Left = 0;
-                    GoLeft = false;
-                }
-            }
-
-            // If player is moving right...
-            if (GoRight)
-            {
-                // Shift player by 'Speed' number of pixels
-                picPlayer.Left += PlayerSpeed;
-
-                // If player goes past the right bounds of the screen
-                if (picPlayer.Right > this.ClientSize.Width)
-                {
-                    picPlayer.Left = this.ClientSize.Width - picPlayer.Width;
-                    GoRight = false;
-                }
-            }
-
-            // If beginning to jump
-            if (Jumping && Grounded)
-            {
-                // Sets intial jump speed
-                JumpSpeed = -22;
-                Grounded = false;
-            }
-
-            // If mid-air
-            if (!Grounded)
-            {
-                // Apply gravity each tick
-                JumpSpeed += Gravity;
-
-                // Cap fall speed
-                if (JumpSpeed > 22) { JumpSpeed = 22; }
-
-                // Move the player vertically
-                picPlayer.Top += JumpSpeed;
-            }
-            else
-            {
-                JumpSpeed = 0;
-            }
-
-            // If player reaches top of screen
-            if (picPlayer.Top < 0)
-            {
-                picPlayer.Top = 0;
-                JumpSpeed = 0;
-            }
-
-            // If player falls off bottom of screen
-            else if (picPlayer.Top > this.ClientSize.Height)
+            if (player.Update(this.ClientSize.Width, this.ClientSize.Height))
             {
                 PlayerDeath();
             }
-        }
 
-        // Handles enemy movement
-        private bool MoveEnemy(PictureBox enemy, int enemySpeed, Label enemyPlatform, bool goRight)
-        {
-            if (goRight)
-                enemy.Left += enemySpeed;
-            else
-                enemy.Left -= enemySpeed;
+            enemy1.Update();
+            enemy2.Update();
 
-            // If enemy reaches left side of platform, go right
-            if (enemy.Left < enemyPlatform.Left)
-            {
-                goRight = true;
-                FlipHorizontal(enemy);
-            }
-            // If enemy reaches right side of platform, go left
-            else if (enemy.Right > enemyPlatform.Right)
-            {
-                goRight = false;
-                FlipHorizontal(enemy);
-            }
-
-            return goRight;
-        }
-
-        // Handles moving platform movement
-        private bool MovePlatform(Label platform, int platformSpeed, bool goDown, int topLimit, int bottomLimit)
-        {
-            if (goDown)
-                platform.Top += platformSpeed;
-            else
-                platform.Top -= platformSpeed;
-
-            if (platform.Top < topLimit)
-                goDown = true;
-            else if (platform.Top > bottomLimit)
-                goDown = false;
-
-                return goDown;
+            movingPlatform1.Update();
+            movingPlatform2.Update();
         }
 
         private void CheckCollision(Control control, string tagValue)
@@ -561,42 +324,38 @@ namespace JumpGame
         {
             if (picPlayer.Bounds.IntersectsWith(platform.Bounds))
             {
-                if (picPlayer.Bounds.IntersectsWith(platform.Bounds))
+                Rectangle plat = platform.Bounds;
+
+                // Additional pixels added to collision checks
+                // Prevents player image from bouncing while on platforms
+                const int SafetyThreshold = 5;
+
+                // Landing on top of platform
+                if (picPlayer.Bottom >= plat.Top - 5 &&
+                    picPlayer.Top < plat.Top &&
+                    player.JumpSpeed >= 0)
                 {
-                    Rectangle plat = platform.Bounds;
-
-                    // Additional pixels added to collision checks
-                    // Prevents player image from bouncing while on platforms
-                    const int SafetyThreshold = 5;
-
-                    // Landing on top of platform
-                    if (picPlayer.Bottom >= plat.Top - 5 &&
-                        picPlayer.Top < plat.Top &&
-                        JumpSpeed >= 0)
-                    {
-                        LandedOnPlatform = true;
-                        Grounded = true;
-                        JumpSpeed = 0;
-                        picPlayer.Top = plat.Top - picPlayer.Height + 1;
-                    }
-                    // Hitting platform from the sides
-                    // Additional
-                    else if (picPlayer.Right > plat.Left && picPlayer.Left < plat.Left && picPlayer.Bottom > plat.Top + SafetyThreshold)
-                    {
-                        picPlayer.Left = plat.Left - picPlayer.Width;
-                        GoRight = false;
-                    }
-                    else if (picPlayer.Left < plat.Right && picPlayer.Right > plat.Right && picPlayer.Bottom > plat.Top + SafetyThreshold)
-                    {
-                        picPlayer.Left = plat.Right;
-                        GoLeft = false;
-                    }
-                    // Hitting platform from below
-                    else if (picPlayer.Top < plat.Bottom && picPlayer.Bottom > plat.Bottom)
-                    {
-                        JumpSpeed = 5; // small bounce back
-                        picPlayer.Top = plat.Bottom;
-                    }
+                    LandedOnPlatform = true;
+                    player.Grounded = true;
+                    player.JumpSpeed = 0;
+                    picPlayer.Top = plat.Top - picPlayer.Height + 1;
+                }
+                // Hitting platform from the sides
+                else if (picPlayer.Right > plat.Left && picPlayer.Left < plat.Left && picPlayer.Bottom > plat.Top + SafetyThreshold)
+                {
+                    picPlayer.Left = plat.Left - picPlayer.Width;
+                    player.StopMovingRight();
+                }
+                else if (picPlayer.Left < plat.Right && picPlayer.Right > plat.Right && picPlayer.Bottom > plat.Top + SafetyThreshold)
+                {
+                    picPlayer.Left = plat.Right;
+                    player.StopMovingLeft();
+                }
+                // Hitting platform from below
+                else if (picPlayer.Top < plat.Bottom && picPlayer.Bottom > plat.Bottom)
+                {
+                    player.JumpSpeed = 5; // small bounce back
+                    picPlayer.Top = plat.Bottom;
                 }
             }
         }
@@ -607,13 +366,6 @@ namespace JumpGame
             {
                 Victory();
             }
-        }
-
-        // Horizontally flips the input character PictureBox
-        private void FlipHorizontal(PictureBox character)
-        {
-            character.Image.RotateFlip(RotateFlipType.RotateNoneFlipX);
-            character.Refresh();
         }
 
         // Ends game with victory
